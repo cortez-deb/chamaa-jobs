@@ -1,7 +1,6 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { RedisQueues, connectRedis } from '../functions/queue.js';
-
 dotenv.config();
 
 const depositQueue = 'queue:shortcode:worker';
@@ -34,20 +33,38 @@ const parseCustomDate = (dateString) => {
  * @param {Object} data - Data from Redis queue
  */
 const processQueueItem = async (data) => {
+    if (!data) {
+        return
+    }
     const chamaDetails = data.chama_details;
     const stkData = data.stkpush;
-
+    const MerchantRequestID = stkData.data.MerchantRequestID;
+    if (!MerchantRequestID) {
+        return false
+    }
     // Fetch transaction status from STK API
-    const transactionResponse = await axios.post(STK_STATUS_API, {
-        MerchantRequestID: stkData.data.MerchantRequestID,
-    });
-    //   console.log(transactionResponse.data.data.data)
+    let transactionResponse
+    try {
+        transactionResponse = await axios.post(STK_STATUS_API, {
+            MerchantRequestID: MerchantRequestID
+        });
 
+    } catch (e) {
+        console.log('Error fetching STK response status: t', e);
+        throw e;
+    }
+    let responseData;
     // Response is an array with a single stringified JSON object
-    const responseData = Array.isArray(transactionResponse.data.data.data)
-        ? JSON.parse(transactionResponse.data.data.data[0])
-        : transactionResponse.data.data.data;
-    // console.log(responseData)
+    if (transactionResponse.data.data.data.length > 0) {
+        responseData = Array.isArray(transactionResponse.data.data.data)
+            ? JSON.parse(transactionResponse.data.data.data[0])
+            : transactionResponse.data.data.data;
+    }
+    else {
+        console.log('No data in STK response status API response');
+        console.log(transactionResponse.data.data)
+        return false;
+    }
     // Extract transaction ID and date from response
     const callbackItems = responseData.stkCallback.CallbackMetadata.Item;
 
@@ -71,7 +88,7 @@ const processQueueItem = async (data) => {
     const wallet_payload = {
         "is_debit": false,
         "is_credit": true,
-        "transaction_id":transactionId,
+        "transaction_id": transactionId,
         "amount": +data.Amount,
         "chamaa_id": chamaDetails.id,
         "user_id": data.user_id,
@@ -81,8 +98,19 @@ const processQueueItem = async (data) => {
     }
 
     // Send payment to payment API
-    const paymentResponse = await axios.post(PAYMENT_IN_API, payload);
-    await axios.post(WALLET_CREDIT_API, wallet_payload);
+    let paymentResponse;
+    try {
+        paymentResponse = await axios.post(PAYMENT_IN_API, payload);
+    } catch (e) {
+        console.log('Error sending payment:', e.message);
+        throw e;
+    }
+    try {
+        await axios.post(WALLET_CREDIT_API, wallet_payload);
+    }
+    catch (e) {
+        console.log('Error crediting wallet:', e.message);
+    }
 
     console.log('Payment processed successfully:', {
         paymentId: paymentResponse.data.data.id,
@@ -98,29 +126,32 @@ const processQueueItem = async (data) => {
  */
 const pollQueue = async () => {
     try {
-        const queueLength = await RedisQueues.queueLength(depositQueue);
+        let queueLength = await RedisQueues.queueLength(depositQueue);
+        console.log(`Queue length: ${queueLength}`);
 
-        if (queueLength > 0) {
+
+        if (queueLength> 0) {
             console.log(`Processing ${queueLength} item(s) from queue...`);
-
-            while (queueLength > 0) {
                 let d
                 try {
                     const data = await RedisQueues.popRightFromQueue(depositQueue);
-                    d = data
-                    if (!data) break;
+                    if (data) {
+                        d = data
+                        await processQueueItem(data)
+                    }
+                    console.log('No data retrieved from queue item, skipping...');
 
-                    await processQueueItem(data);
                 } catch (itemError) {
-                    console.error('Error processing queue item:', itemError.message);
+                    console.error('Error processing queue item:', itemError)
+                    console.log(d)
                     await RedisQueues.addToQueue(depositQueue, d)
                     console.log('Returned item to queue')
                     // Continue with next item instead of breaking
                 }
-            }
+            
         }
     } catch (error) {
-        console.error('Error polling queue:', error.message);
+        console.error('Error polling queue:', error);
     }
 };
 
@@ -137,4 +168,4 @@ const startWorker = () => {
     setInterval(pollQueue, POLL_INTERVAL_MS);
 };
 startWorker();
-pollQueue();
+// pollQueue();

@@ -50,7 +50,18 @@ export class RedisQueues {
     static async peek(queue) {
         try {
             const response = await redis.lrange(queue, 0, -1);
-            return response.map(item => JSON.parse(item));
+            const data = response.map(item =>{
+                if(item && item.length > 0){
+                    try{
+                        return JSON.parse(item);
+                    }catch(e){
+                        console.error('Error parsing queue item:', e);
+                        return "{error: 'Invalid JSON'}";
+                    }
+                }                
+                return "{error: 'Empty item'}";
+            });
+            return data;
         } catch (error) {
             console.error('Error peeking queue:', error);
             throw error;
