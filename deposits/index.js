@@ -7,7 +7,7 @@ const depositQueue = 'queue:shortcode:worker';
 const STK_STATUS_API = `${process.env.gateway}/api/v1/payments/stk/response/status`
 const PAYMENT_IN_API = `${process.env.mpesa_ms_url}/payments/in`;
 const WALLET_CREDIT_API = `${process.env.mpesa_ms_url}/wallet/`
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '1000', 10); // Default 15 seconds
+const POLL_INTERVAL_MS = parseInt(1500); // Default 15 seconds
 console.log('Worker configuration:', {
     STK_STATUS_API,
     PAYMENT_IN_API,
@@ -165,7 +165,6 @@ const startWorker = () => {
     pollQueue();
 
     // Then run at configured interval
-    setInterval(pollQueue, POLL_INTERVAL_MS);
 };
-startWorker();
-// pollQueue();
+// startWorker();
+setInterval(pollQueue, POLL_INTERVAL_MS);
